@@ -1,6 +1,0 @@
-node_modules
-sessions
-*.bak
-*.zip
-database.json
-push.sh
