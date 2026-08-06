@@ -7,161 +7,80 @@ import { watchFile, unwatchFile } from 'fs';
 import readline from 'readline';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-
-const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
-});
+const rl = readline.createInterface(process.stdin, process.stdout);
 
 let worker = null;
 let running = false;
 let restartTimer = null;
-let currentFile = 'main.js';
-
 
 function start(file) {
-    if (running) return;
+	if (running) return;
+	running = true;
+	const full = join(__dirname, file);
 
-    running = true;
-    currentFile = file;
+	if (worker) worker.terminate();
+	worker = new Worker(full);
+	if (restartTimer) {
+		clearTimeout(restartTimer);
+		restartTimer = null;
+	}
 
-    const full = join(__dirname, file);
+	worker.on('message', (msg) => {
+		console.log('[MESSAGE]', msg);
 
-    console.log('🚀 Starting worker:', file);
+		if (msg === 'restart' || msg === 'reset') {
+			restart();
+		}
+	});
 
-    if (worker) {
-        try {
-            worker.terminate();
-        } catch {}
-    }
+	worker.on('exit', (code) => {
+		console.log('❗ Worker exited with code', code);
+		running = false;
+		if (code !== 0) {
+			restartTimer = setTimeout(
+				() => {
+					console.log('⏳ Auto restart...');
+					restart();
+				},
+				30 * 60 * 1000
+			);
+		}
+		watchFile(full, () => {
+			unwatchFile(full);
+			console.log('♻️ File updated → Restarting...');
+			start(file);
+		});
+	});
 
-    try {
-        worker = new Worker(full);
-    } catch (err) {
-        console.error('❌ Worker start error:', err);
-        running = false;
-        return;
-    }
+	if (!rl.listenerCount('line')) {
+		rl.on('line', (line) => {
+			const cmd = line.trim().toLowerCase();
+			if (!cmd) return;
 
+			if (cmd === 'exit') {
+				console.log('⛔ Exiting...');
+				worker?.terminate();
+				process.exit(0);
+			}
+			if (cmd === 'restart' || cmd === 'reset') {
+				console.log('🍃Restart...');
+				restart();
+			}
 
-    if (restartTimer) {
-        clearTimeout(restartTimer);
-        restartTimer = null;
-    }
-
-
-    worker.on('message', (msg) => {
-        console.log('[MESSAGE]', msg);
-
-        if (msg === 'restart' || msg === 'reset') {
-            restart();
-        }
-    });
-
-
-    worker.on('error', (err) => {
-        console.error('❌ Worker error:', err);
-    });
-
-
-    worker.on('exit', (code) => {
-        console.log('❗ Worker exited with code:', code);
-
-        running = false;
-
-
-        if (code !== 0) {
-
-            restartTimer = setTimeout(() => {
-
-                console.log('⏳ Auto restart...');
-                restart();
-
-            }, 30000); // 30 ثانية
-
-        }
-
-
-        watchFile(full, () => {
-
-            unwatchFile(full);
-
-            console.log('♻️ File updated → Restarting...');
-
-            restart();
-
-        });
-
-    });
-
-
-    if (!rl.listenerCount('line')) {
-
-        rl.on('line', (line) => {
-
-            const cmd = line.trim().toLowerCase();
-
-            if (!cmd) return;
-
-
-            if (cmd === 'exit') {
-
-                console.log('⛔ Exiting...');
-
-                worker?.terminate();
-
-                process.exit(0);
-
-            }
-
-
-            if (cmd === 'restart' || cmd === 'reset') {
-
-                console.log('🍃 Restarting...');
-
-                restart();
-
-                return;
-            }
-
-
-            worker?.postMessage(cmd);
-
-        });
-
-    }
-
+			worker?.postMessage(cmd);
+		});
+	}
 }
-
-
 
 function restart() {
+	if (worker) {
+		try {
+			worker.terminate();
+		} catch {}
+	}
+	running = false;
 
-    console.log('🔄 Restarting worker...');
-
-
-    if (worker) {
-
-        try {
-
-            worker.terminate();
-
-        } catch {}
-
-    }
-
-
-    running = false;
-
-
-    setTimeout(() => {
-
-        start(currentFile);
-
-    }, 1000);
-
+	start('main.js');
 }
-
-
 
 start('main.js');
